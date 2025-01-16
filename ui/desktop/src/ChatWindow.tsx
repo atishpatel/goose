@@ -25,6 +25,7 @@ import {
   OPENAI_DEFAULT_MODEL,
   ANTHROPIC_DEFAULT_MODEL,
 } from "./utils/providerUtils";
+import Keys from "./components/settings/Keys";
 
 declare global {
   interface Window {
@@ -543,6 +544,7 @@ export default function ChatWindow() {
             }
           />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/keys" element={<Keys />} />
           <Route path="*" element={<Navigate to="/chat/1" replace />} />
         </Routes>
       </div>
