@@ -8,12 +8,10 @@ use goose::conversation::{message::Message, Conversation};
 use goose::recipe::Recipe;
 use goose::recipe_deeplink;
 
-use http::HeaderMap;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::routes::recipe_utils::get_all_recipes_manifests;
-use crate::routes::utils::verify_secret_key;
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -116,16 +114,7 @@ async fn create_recipe(
         request.messages.len()
     );
 
-    let error_response = CreateRecipeResponse {
-        recipe: None,
-        error: Some("Missing agent".to_string()),
-    };
-    let agent = state.get_agent().await.map_err(|e| {
-        tracing::error!("Failed to get agent for recipe creation: {}", e);
-        (StatusCode::PRECONDITION_FAILED, Json(error_response))
-    })?;
-
-    tracing::debug!("Agent retrieved successfully, creating recipe from conversation");
+    let agent = state.get_agent().await;
 
     // Create base recipe from agent state and messages
     let recipe_result = agent
@@ -134,16 +123,12 @@ async fn create_recipe(
 
     match recipe_result {
         Ok(mut recipe) => {
-            tracing::info!("Recipe created successfully with title: '{}'", recipe.title);
-
-            // Update with user-provided metadata
             recipe.title = request.title;
             recipe.description = request.description;
             if request.activities.is_some() {
                 recipe.activities = request.activities
             };
 
-            // Add author if provided
             if let Some(author_req) = request.author {
                 recipe.author = Some(goose::recipe::Author {
                     contact: author_req.contact,
@@ -151,19 +136,13 @@ async fn create_recipe(
                 });
             }
 
-            tracing::debug!("Recipe metadata updated, returning success response");
-
             Ok(Json(CreateRecipeResponse {
                 recipe: Some(recipe),
                 error: None,
             }))
         }
         Err(e) => {
-            // Log the detailed error for debugging
-            tracing::error!("Recipe creation failed: {}", e);
             tracing::error!("Error details: {:?}", e);
-
-            // Return 400 Bad Request with error message
             let error_message = format!("Recipe creation failed: {}", e);
             let error_response = CreateRecipeResponse {
                 recipe: None,
@@ -249,10 +228,7 @@ async fn scan_recipe(
 )]
 async fn list_recipes(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
 ) -> Result<Json<ListRecipeResponse>, StatusCode> {
-    verify_secret_key(&headers, &state)?;
-
     let recipe_manifest_with_paths = get_all_recipes_manifests().unwrap();
     let mut recipe_file_hash_map = HashMap::new();
     let recipe_manifest_responses = recipe_manifest_with_paths
@@ -291,12 +267,8 @@ async fn list_recipes(
 )]
 async fn delete_recipe(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
     Json(request): Json<DeleteRecipeRequest>,
 ) -> StatusCode {
-    if verify_secret_key(&headers, &state).is_err() {
-        return StatusCode::UNAUTHORIZED;
-    }
     let recipe_file_hash_map = state.recipe_file_hash_map.lock().await;
     let file_path = match recipe_file_hash_map.get(&request.id) {
         Some(path) => path,
